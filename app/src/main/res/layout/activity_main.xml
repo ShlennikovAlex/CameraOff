@@ -14,24 +14,30 @@
         android:paddingEnd="32dp">
 
         <ImageView
+            android:id="@+id/icon"
             android:layout_width="88dp"
             android:layout_height="88dp"
+            android:alpha="0"
             android:src="@drawable/ic_camera_broken"
             android:contentDescription="@null" />
 
         <TextView
+            android:id="@+id/title"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
             android:layout_marginTop="24dp"
+            android:alpha="0"
             android:text="@string/err_title"
             android:textColor="@color/fg"
             android:textSize="19sp"
             android:textStyle="bold" />
 
         <TextView
+            android:id="@+id/subtitle"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
             android:layout_marginTop="10dp"
+            android:alpha="0"
             android:text="@string/err_text"
             android:textColor="@color/fg_dim"
             android:textSize="13.5sp" />
