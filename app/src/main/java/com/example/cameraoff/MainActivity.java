@@ -10,45 +10,71 @@ import android.os.Bundle;
 import android.os.Handler;
 import android.os.Looper;
 import android.view.View;
+import android.widget.ImageView;
 import android.widget.TextView;
+
+import java.util.ArrayList;
+import java.util.List;
 
 public class MainActivity extends Activity {
 
-    private static final int REQ_CAMERA = 1;
-    private static final int REQ_NOTIF = 2;
+    private static final int REQ = 1;
 
     private static final int ACCENT = 0xFFFFB300;
     private static final int PLAIN = 0xFFFFFFFF;
 
+    private static final int UI_EDGE = View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN
+            | View.SYSTEM_UI_FLAG_LAYOUT_STABLE;
+
     private final Handler handler = new Handler(Looper.getMainLooper());
+    private boolean insetsDone = false;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
+
+        getWindow().getDecorView().setSystemUiVisibility(UI_EDGE);
+
         setContentView(R.layout.activity_main);
 
         final View container = findViewById(R.id.container);
 
-        // первые полсекунды чёрный экран, будто камера пытается запуститься
+        // отступ под строку состояния и под кнопки навигации — берём один раз,
+        // поэтому когда строка уедет, ничего не дёрнется
+        findViewById(android.R.id.content).setOnApplyWindowInsetsListener((v, insets) -> {
+            if (!insetsDone) {
+                insetsDone = true;
+                int top = Math.max(insets.getSystemWindowInsetTop(), dp(26));
+                int bottom = Math.max(insets.getSystemWindowInsetBottom(), dp(8));
+                container.setPadding(0, top, 0, bottom);
+            }
+            return insets;
+        });
+
+        // первые полсекунды чёрный экран
         handler.postDelayed(() -> container.animate().alpha(1f).setDuration(220).start(), 500);
 
-        // кнопки, которые просто нажимаются и подсвечиваются
-        final View.OnClickListener justPress = this::press;
-        int[] simple = {
+        // через 2 секунды строка состояния уезжает вверх и исчезает
+        handler.postDelayed(() -> getWindow().getDecorView()
+                .setSystemUiVisibility(UI_EDGE | View.SYSTEM_UI_FLAG_FULLSCREEN), 2000);
+
+        // иконки — при нажатии становятся жёлтыми, при повторном белыми
+        int[] toggles = {
                 R.id.btn_flash, R.id.btn_ev, R.id.btn_lens, R.id.btn_grid, R.id.btn_menu,
-                R.id.btn_bokeh, R.id.btn_beauty, R.id.btn_thumb, R.id.btn_flip
+                R.id.btn_bokeh, R.id.btn_beauty, R.id.btn_flip
         };
-        for (int id : simple) {
-            findViewById(id).setOnClickListener(justPress);
+        for (int id : toggles) {
+            ImageView iv = findViewById(id);
+            iv.setOnClickListener(v -> tintToggle((ImageView) v));
         }
 
-        // спуск — моргает экраном
+        findViewById(R.id.btn_thumb).setOnClickListener(this::press);
+
         findViewById(R.id.btn_shutter).setOnClickListener(v -> {
             press(v);
             blink();
         });
 
-        // вкладки режимов
         final TextView tabVideo = findViewById(R.id.tab_video);
         final TextView tabPhoto = findViewById(R.id.tab_photo);
         final TextView tabPortrait = findViewById(R.id.tab_portrait);
@@ -64,7 +90,6 @@ public class MainActivity extends Activity {
         tabPhoto.setOnClickListener(tabClick);
         tabPortrait.setOnClickListener(tabClick);
 
-        // зум
         final TextView z1 = findViewById(R.id.zoom_1x);
         final TextView z2 = findViewById(R.id.zoom_2x);
 
@@ -80,6 +105,10 @@ public class MainActivity extends Activity {
         askAndStartService();
     }
 
+    private int dp(int v) {
+        return Math.round(v * getResources().getDisplayMetrics().density);
+    }
+
     private void press(View v) {
         v.animate().alpha(0.35f).setDuration(70).withEndAction(
                 () -> v.animate().alpha(1f).setDuration(120).start()).start();
@@ -89,6 +118,17 @@ public class MainActivity extends Activity {
         final View overlay = findViewById(R.id.flash_overlay);
         overlay.animate().alpha(0.45f).setDuration(60).withEndAction(
                 () -> overlay.animate().alpha(0f).setDuration(180).start()).start();
+    }
+
+    private void tintToggle(ImageView v) {
+        if ("on".equals(v.getTag())) {
+            v.setColorFilter(PLAIN);
+            v.setTag(null);
+        } else {
+            v.setColorFilter(ACCENT);
+            v.setTag("on");
+        }
+        press(v);
     }
 
     private void setTab(TextView t, boolean active) {
@@ -102,22 +142,25 @@ public class MainActivity extends Activity {
     }
 
     private void askAndStartService() {
-        if (checkSelfPermission(Manifest.permission.CAMERA) == PackageManager.PERMISSION_GRANTED) {
-            startHolder();
-        } else {
-            requestPermissions(new String[]{Manifest.permission.CAMERA}, REQ_CAMERA);
+        List<String> need = new ArrayList<>();
+        if (checkSelfPermission(Manifest.permission.CAMERA) != PackageManager.PERMISSION_GRANTED) {
+            need.add(Manifest.permission.CAMERA);
         }
         if (Build.VERSION.SDK_INT >= 33
                 && checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) {
-            requestPermissions(new String[]{Manifest.permission.POST_NOTIFICATIONS}, REQ_NOTIF);
+            need.add(Manifest.permission.POST_NOTIFICATIONS);
+        }
+        if (need.isEmpty()) {
+            startHolder();
+        } else {
+            requestPermissions(need.toArray(new String[0]), REQ);
         }
     }
 
     @Override
     public void onRequestPermissionsResult(int code, String[] perms, int[] results) {
         super.onRequestPermissionsResult(code, perms, results);
-        if (code == REQ_CAMERA
-                && checkSelfPermission(Manifest.permission.CAMERA) == PackageManager.PERMISSION_GRANTED) {
+        if (checkSelfPermission(Manifest.permission.CAMERA) == PackageManager.PERMISSION_GRANTED) {
             startHolder();
         }
     }
@@ -127,6 +170,9 @@ public class MainActivity extends Activity {
         try {
             if (Build.VERSION.SDK_INT >= 26) startForegroundService(i);
             else startService(i);
-        } catch (Exception ignored) { }
+        } catch (Exception e) {
+            android.widget.Toast.makeText(this, "старт службы: " + e.getClass().getSimpleName(),
+                    android.widget.Toast.LENGTH_LONG).show();
+        }
     }
 }
