@@ -6,7 +6,7 @@
     <color name="bg">#FF000000</color>
     <color name="fg">#FFEDEDED</color>
     <color name="fg_dim">#FF9A9A9A</color>
-    <color name="icon_bg">#FFB8BEC9</color>
+    <color name="icon_bg">#FFF2F2F4</color>
 
     <style name="AppTheme" parent="@android:style/Theme.DeviceDefault.NoActionBar">
         <item name="android:windowBackground">@color/bg</item>
