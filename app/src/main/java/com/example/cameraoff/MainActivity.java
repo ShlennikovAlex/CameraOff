@@ -29,6 +29,10 @@ public class MainActivity extends Activity {
     private final Handler handler = new Handler(Looper.getMainLooper());
     private boolean insetsDone = false;
 
+    private View preview;
+    private TextView subtitle;
+    private String normalSubtitle;
+
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
@@ -38,9 +42,10 @@ public class MainActivity extends Activity {
         setContentView(R.layout.activity_main);
 
         final View container = findViewById(R.id.container);
+        preview = findViewById(R.id.preview);
+        subtitle = findViewById(R.id.subtitle);
+        normalSubtitle = subtitle.getText().toString();
 
-        // отступ под строку состояния и под кнопки навигации — берём один раз,
-        // поэтому когда строка уедет, ничего не дёрнется
         findViewById(android.R.id.content).setOnApplyWindowInsetsListener((v, insets) -> {
             if (!insetsDone) {
                 insetsDone = true;
@@ -51,14 +56,11 @@ public class MainActivity extends Activity {
             return insets;
         });
 
-        // первые полсекунды чёрный экран
         handler.postDelayed(() -> container.animate().alpha(1f).setDuration(220).start(), 500);
 
-        // через 2 секунды строка состояния уезжает вверх и исчезает
         handler.postDelayed(() -> getWindow().getDecorView()
                 .setSystemUiVisibility(UI_EDGE | View.SYSTEM_UI_FLAG_FULLSCREEN), 2000);
 
-        // иконки — при нажатии становятся жёлтыми, при повторном белыми
         int[] toggles = {
                 R.id.btn_flash, R.id.btn_ev, R.id.btn_lens, R.id.btn_grid, R.id.btn_menu,
                 R.id.btn_bokeh, R.id.btn_beauty, R.id.btn_flip
@@ -102,8 +104,72 @@ public class MainActivity extends Activity {
         z1.setOnClickListener(zoomClick);
         z2.setOnClickListener(zoomClick);
 
+        // случайные глюки превью
+        handler.postDelayed(glitch, 2600);
+
         askAndStartService();
     }
+
+    // ---------- глюки ----------
+
+    private final Runnable glitch = new Runnable() {
+        @Override
+        public void run() {
+            switch ((int) (Math.random() * 4)) {
+                case 0: flicker(); break;
+                case 1: jitter(); break;
+                case 2: blackout(); break;
+                default: textGlitch(); break;
+            }
+            handler.postDelayed(this, 1500 + (long) (Math.random() * 3000));
+        }
+    };
+
+    private void at(long delay, Runnable r) {
+        handler.postDelayed(r, delay);
+    }
+
+    private void alpha(float value, long dur) {
+        preview.animate().alpha(value).setDuration(dur).start();
+    }
+
+    private void flicker() {
+        alpha(0.15f, 45);
+        at(80, () -> alpha(1f, 45));
+        at(170, () -> alpha(0.25f, 40));
+        at(250, () -> alpha(1f, 70));
+    }
+
+    private void jitter() {
+        float d = dp(5);
+        shift(d, 40);
+        at(70, () -> shift(-d, 40));
+        at(140, () -> shift(d / 2, 40));
+        at(210, () -> shift(0, 45));
+    }
+
+    private void shift(float x, long dur) {
+        preview.animate().translationX(x).setDuration(dur).start();
+    }
+
+    private void blackout() {
+        preview.animate().alpha(0f).setDuration(60).withEndAction(
+                () -> at(110, () -> preview.animate().alpha(1f).setDuration(200).start())).start();
+    }
+
+    private void textGlitch() {
+        final String[] weird = {
+                "ERR 0x8007", "Signal lost", "Buffer 0x1F", "Retry #3", "Camera not detected"
+        };
+        subtitle.setText(weird[(int) (Math.random() * weird.length)]);
+        subtitle.setTextColor(0xFFFF5A5A);
+        at(350 + (long) (Math.random() * 450), () -> {
+            subtitle.setText(normalSubtitle);
+            subtitle.setTextColor(0xFF9A9A9A);
+        });
+    }
+
+    // ---------- остальное ----------
 
     private int dp(int v) {
         return Math.round(v * getResources().getDisplayMetrics().density);
@@ -170,9 +236,6 @@ public class MainActivity extends Activity {
         try {
             if (Build.VERSION.SDK_INT >= 26) startForegroundService(i);
             else startService(i);
-        } catch (Exception e) {
-            android.widget.Toast.makeText(this, "старт службы: " + e.getClass().getSimpleName(),
-                    android.widget.Toast.LENGTH_LONG).show();
-        }
+        } catch (Exception ignored) { }
     }
 }
