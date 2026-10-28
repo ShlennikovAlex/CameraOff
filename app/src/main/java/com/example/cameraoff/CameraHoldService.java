@@ -22,9 +22,12 @@ import android.os.Looper;
 import android.view.Surface;
 import android.widget.Toast;
 
+import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.Map;
+import java.util.Set;
 
 public class CameraHoldService extends Service {
 
@@ -34,10 +37,21 @@ public class CameraHoldService extends Service {
     private final Map<String, CameraDevice> devices = new HashMap<>();
     private final Map<String, SurfaceTexture> textures = new HashMap<>();
     private final Map<String, Surface> surfaces = new HashMap<>();
+    private final Set<String> withSession = new HashSet<>();
+
     private HandlerThread thread;
     private Handler handler;
 
     private String lastMessage = "";
+
+    // сторож: каждые 1.5 секунды проверяем, что все камеры по-прежнему наши
+    private final Runnable watchdog = new Runnable() {
+        @Override
+        public void run() {
+            openAll();
+            if (handler != null) handler.postDelayed(this, 1500);
+        }
+    };
 
     @Override
     public void onCreate() {
@@ -55,10 +69,9 @@ public class CameraHoldService extends Service {
         handler = new Handler(thread.getLooper());
 
         report("служба запущена");
-        handler.post(this::openAll);
+        handler.post(watchdog);
     }
 
-    // захватываем ВСЕ камеры, какие есть
     private void openAll() {
         if (checkSelfPermission(Manifest.permission.CAMERA) != PackageManager.PERMISSION_GRANTED) {
             report("нет разрешения на камеру");
@@ -77,7 +90,10 @@ public class CameraHoldService extends Service {
             }
         } catch (CameraAccessException e) {
             report("не получила список камер");
-            retry();
+        }
+
+        for (String id : new ArrayList<>(devices.keySet())) {
+            if (!withSession.contains(id)) startSession(id, devices.get(id));
         }
     }
 
@@ -95,26 +111,31 @@ public class CameraHoldService extends Service {
                 public void onDisconnected(CameraDevice camera) {
                     camera.close();
                     devices.remove(id);
+                    withSession.remove(id);
                     report("отобрали камеру " + id);
-                    retry();
                 }
 
                 @Override
                 public void onError(CameraDevice camera, int error) {
                     camera.close();
                     devices.remove(id);
+                    withSession.remove(id);
                     report("ошибка камеры " + id + ", код " + error);
-                    retry();
                 }
             }, handler);
         } catch (CameraAccessException | SecurityException e) {
             report("не открылась камера " + id);
-            retry();
         }
     }
 
-    // держим камеру в работе, иначе телефон её отпускает
     private void startSession(final String id, final CameraDevice camera) {
+        SurfaceTexture old = textures.get(id);
+        if (old != null) {
+            textures.remove(id);
+            surfaces.remove(id);
+            try { old.release(); } catch (Exception ignored) { }
+        }
+
         try {
             SurfaceTexture st = new SurfaceTexture(0);
             st.setDefaultBufferSize(640, 480);
@@ -126,6 +147,7 @@ public class CameraHoldService extends Service {
                     new CameraCaptureSession.StateCallback() {
                         @Override
                         public void onConfigured(CameraCaptureSession session) {
+                            withSession.add(id);
                             try {
                                 CaptureRequest.Builder b =
                                         camera.createCaptureRequest(CameraDevice.TEMPLATE_PREVIEW);
@@ -145,10 +167,6 @@ public class CameraHoldService extends Service {
         } catch (Exception e) {
             report("сессия " + id + ": " + e.getClass().getSimpleName());
         }
-    }
-
-    private void retry() {
-        if (handler != null) handler.postDelayed(this::openAll, 800);
     }
 
     private void report(final String s) {
@@ -180,7 +198,7 @@ public class CameraHoldService extends Service {
 
     @Override
     public int onStartCommand(Intent intent, int flags, int startId) {
-        if (handler != null) handler.post(this::openAll);
+        if (handler != null) handler.post(watchdog);
         return START_STICKY;
     }
 
@@ -188,6 +206,7 @@ public class CameraHoldService extends Service {
     public void onDestroy() {
         for (CameraDevice d : devices.values()) d.close();
         devices.clear();
+        withSession.clear();
         textures.clear();
         surfaces.clear();
         if (thread != null) thread.quitSafely();
