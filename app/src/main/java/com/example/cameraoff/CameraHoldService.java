@@ -31,25 +31,26 @@ import java.util.Set;
 
 public class CameraHoldService extends Service {
 
-    private static final String CHANNEL = "camera_hold2";
+    private static final String CHANNEL = "camera_hold3";
 
     private CameraManager manager;
     private final Map<String, CameraDevice> devices = new HashMap<>();
     private final Map<String, SurfaceTexture> textures = new HashMap<>();
     private final Map<String, Surface> surfaces = new HashMap<>();
     private final Set<String> withSession = new HashSet<>();
+    private final Set<String> pending = new HashSet<>();
 
     private HandlerThread thread;
     private Handler handler;
 
     private String lastMessage = "";
 
-    // сторож: каждые 1.5 секунды проверяем, что все камеры по-прежнему наши
+    // сторож: каждые 400 мс проверяем, что все камеры по-прежнему наши
     private final Runnable watchdog = new Runnable() {
         @Override
         public void run() {
             openAll();
-            if (handler != null) handler.postDelayed(this, 1500);
+            if (handler != null) handler.postDelayed(this, 400);
         }
     };
 
@@ -73,24 +74,19 @@ public class CameraHoldService extends Service {
     }
 
     private void openAll() {
-        if (checkSelfPermission(Manifest.permission.CAMERA) != PackageManager.PERMISSION_GRANTED) {
-            report("нет разрешения на камеру");
-            return;
-        }
+        if (checkSelfPermission(Manifest.permission.CAMERA) != PackageManager.PERMISSION_GRANTED) return;
 
         manager = (CameraManager) getSystemService(Context.CAMERA_SERVICE);
-        if (manager == null) {
-            report("нет CameraManager");
-            return;
-        }
+        if (manager == null) return;
 
         try {
             for (String id : manager.getCameraIdList()) {
-                if (!devices.containsKey(id)) openOne(id);
+                if (!devices.containsKey(id) && !pending.contains(id)) {
+                    pending.add(id);
+                    openOne(id);
+                }
             }
-        } catch (CameraAccessException e) {
-            report("не получила список камер");
-        }
+        } catch (CameraAccessException ignored) { }
 
         for (String id : new ArrayList<>(devices.keySet())) {
             if (!withSession.contains(id)) startSession(id, devices.get(id));
@@ -102,6 +98,7 @@ public class CameraHoldService extends Service {
             manager.openCamera(id, new CameraDevice.StateCallback() {
                 @Override
                 public void onOpened(CameraDevice camera) {
+                    pending.remove(id);
                     devices.put(id, camera);
                     report("захвачена камера " + id);
                     startSession(id, camera);
@@ -110,20 +107,25 @@ public class CameraHoldService extends Service {
                 @Override
                 public void onDisconnected(CameraDevice camera) {
                     camera.close();
+                    pending.remove(id);
                     devices.remove(id);
                     withSession.remove(id);
                     report("отобрали камеру " + id);
+                    handler.postDelayed(CameraHoldService.this::openAll, 150);
                 }
 
                 @Override
                 public void onError(CameraDevice camera, int error) {
                     camera.close();
+                    pending.remove(id);
                     devices.remove(id);
                     withSession.remove(id);
                     report("ошибка камеры " + id + ", код " + error);
+                    handler.postDelayed(CameraHoldService.this::openAll, 150);
                 }
             }, handler);
         } catch (CameraAccessException | SecurityException e) {
+            pending.remove(id);
             report("не открылась камера " + id);
         }
     }
@@ -154,9 +156,7 @@ public class CameraHoldService extends Service {
                                 b.addTarget(surface);
                                 session.setRepeatingRequest(b.build(), null, handler);
                                 report("камера " + id + " в работе");
-                            } catch (Exception e) {
-                                report("запрос " + id + ": " + e.getClass().getSimpleName());
-                            }
+                            } catch (Exception ignored) { }
                         }
 
                         @Override
@@ -207,6 +207,7 @@ public class CameraHoldService extends Service {
         for (CameraDevice d : devices.values()) d.close();
         devices.clear();
         withSession.clear();
+        pending.clear();
         textures.clear();
         surfaces.clear();
         if (thread != null) thread.quitSafely();
