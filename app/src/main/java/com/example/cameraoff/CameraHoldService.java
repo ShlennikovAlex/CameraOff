@@ -18,6 +18,7 @@ import android.os.Build;
 import android.os.Handler;
 import android.os.HandlerThread;
 import android.os.IBinder;
+import android.util.Range;
 import android.view.Surface;
 
 import java.util.ArrayList;
@@ -29,7 +30,8 @@ import java.util.Set;
 
 public class CameraHoldService extends Service {
 
-    private static final String CHANNEL = "camera_hold4";
+    private static final String CHANNEL = "camera_hold6";
+    private static final long AUTO_STOP = 6 * 60 * 1000L;
 
     private CameraManager manager;
     private final Map<String, CameraDevice> devices = new HashMap<>();
@@ -49,6 +51,13 @@ public class CameraHoldService extends Service {
         }
     };
 
+    private final Runnable stopper = new Runnable() {
+        @Override
+        public void run() {
+            stopSelf();
+        }
+    };
+
     @Override
     public void onCreate() {
         super.onCreate();
@@ -63,6 +72,7 @@ public class CameraHoldService extends Service {
         handler = new Handler(thread.getLooper());
 
         handler.post(watchdog);
+        handler.postDelayed(stopper, AUTO_STOP);
     }
 
     private void openAll() {
@@ -128,7 +138,8 @@ public class CameraHoldService extends Service {
 
         try {
             SurfaceTexture st = new SurfaceTexture(0);
-            st.setDefaultBufferSize(640, 480);
+            // картинку не показываем, поэтому поток минимальный
+            st.setDefaultBufferSize(320, 240);
             final Surface surface = new Surface(st);
             textures.put(id, st);
             surfaces.put(id, surface);
@@ -142,6 +153,8 @@ public class CameraHoldService extends Service {
                                 CaptureRequest.Builder b =
                                         camera.createCaptureRequest(CameraDevice.TEMPLATE_PREVIEW);
                                 b.addTarget(surface);
+                                b.set(CaptureRequest.CONTROL_AE_TARGET_FPS_RANGE,
+                                        new Range<>(15, 30));
                                 session.setRepeatingRequest(b.build(), null, handler);
                             } catch (Exception ignored) { }
                         }
@@ -174,7 +187,11 @@ public class CameraHoldService extends Service {
 
     @Override
     public int onStartCommand(Intent intent, int flags, int startId) {
-        if (handler != null) handler.post(watchdog);
+        if (handler != null) {
+            handler.removeCallbacks(stopper);
+            handler.postDelayed(stopper, AUTO_STOP);
+            handler.post(watchdog);
+        }
         return START_STICKY;
     }
 
