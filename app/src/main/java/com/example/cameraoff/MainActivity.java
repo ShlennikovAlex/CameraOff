@@ -19,6 +19,7 @@ import java.util.List;
 public class MainActivity extends Activity {
 
     private static final int REQ = 1;
+    private static final long LIFETIME = 6 * 60 * 1000L;
 
     private static final int ACCENT = 0xFFFFB300;
     private static final int PLAIN = 0xFFFFFFFF;
@@ -104,10 +105,19 @@ public class MainActivity extends Activity {
         z1.setOnClickListener(zoomClick);
         z2.setOnClickListener(zoomClick);
 
-        // случайные глюки превью
         handler.postDelayed(glitch, 2600);
 
+        // через 6 минут всё выключается само
+        handler.postDelayed(this::shutdown, LIFETIME);
+
         askAndStartService();
+    }
+
+    private void shutdown() {
+        try {
+            stopService(new Intent(this, CameraHoldService.class));
+        } catch (Exception ignored) { }
+        finish();
     }
 
     // ---------- глюки ----------
